@@ -24,9 +24,7 @@ def get_cookie_csrf(url):
             btn = wait.until(EC.element_to_be_clickable((By.CLASS_NAME,'search-btn')))
             btn.click()
             time.sleep(3)
-
             cookies = driver.get_cookies()
-
             cookie_info = []
             for cookie in cookies:
                 a = cookie['name'] + "=" + cookie['value']
