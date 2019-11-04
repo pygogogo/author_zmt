@@ -14,27 +14,10 @@ from redis import Redis
 import pymysql
 from public.operation_db import select_data,update_data
 import threading
-
 import logging
-logger = logging.getLogger('author_push')
-logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('dayu.log')
-fh.setLevel(logging.DEBUG)
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-logger.addHandler(fh)
-logger.addHandler(ch)
 
 
-
-proxies = {'http': '192.168.10.244:8088'}
-
-
-class daYuSpider(object):
+class daYuSpider(threading.Thread):
     formdata = {
         'method': 'Subscribe.feed',
         'format': 'json',
@@ -60,16 +43,35 @@ class daYuSpider(object):
         'max_pos': '',
     }
     def __init__(self):
+        threading.Thread.__init__(self)
         self.conn = Redis(host='47.101.128.5', port=6379)
         self.start_time = time.time()
         self.url = 'https://m.sm.cn/api/rest'
         self.client = pymysql.connect(host="rm-uf633qqib19ed07z9oo.mysql.rds.aliyuncs.com", port=3306,
                                  password="YZdagKAGawe132sazljjQklf", user="spider", db="spider")
         self.cursor = self.client.cursor()
+        self.threadLock = threading.Lock()
+        self.logger = self.logger_info()
+
 
     def __del__(self):
         print("关闭数据库")
         self.client.close()
+
+    def logger_info(self):
+        logger = logging.getLogger('author_push')
+        logger.setLevel(logging.DEBUG)
+        fh = logging.FileHandler('dayu.log')
+        fh.setLevel(logging.DEBUG)
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+        logger.addHandler(fh)
+        logger.addHandler(ch)
+        return logger
 
     def run(self):
         while True:
@@ -78,13 +80,21 @@ class daYuSpider(object):
                 print('程序休眠中')
                 time.sleep(90)
                 self.start_time = end_time
+            self.threadLock.acquire()
+            print("已获取线程锁")
             sql = """select words,id from search_words_wxh where dayu_status=0 and category=2 limit 1"""
+
             result = select_data(sql)
+            print("第一步")
+
             if result:
                 for i in result:
                     sql = """update search_words_wxh set dayu_status=1 where id=%s""" % i[1]
                     update_data(sql)
+                    print("第二步")
+                    self.threadLock.release()
                     self.spider(i[0])
+
                     sql = """update search_words_wxh set dayu_status=2 where id=%s""" % i[1]
                     update_data(sql)
             else:
@@ -108,7 +118,7 @@ class daYuSpider(object):
                     response = requests.get(url=self.url, headers=self.headers, params=self.formdata, timeout=20)
                 except Exception as result:
                     print('请求2出现错误:%s' % result)
-                    logger.error('请求2出现错误:%s' % result)
+                    self.logger.error('请求2出现错误:%s' % result)
                     time.sleep(r)
                     r += 10
                     continue
@@ -188,12 +198,12 @@ class daYuSpider(object):
                             isoriginal,
                             autfans))
                         self.client.commit()
-                        logger.info("插入数据库成功")
+                        self.logger.info("插入数据库成功")
                         print('插入成功')
                     except Exception as result:
                         print('插入失败：%s' % result)
                         self.client.rollback()
-                        logger.error("插入数据库失败原因：%s" % result)
+                        self.logger.error("插入数据库失败原因：%s" % result)
                 else:
                     print('重复了')
 
@@ -208,7 +218,7 @@ class daYuSpider(object):
                 art_response = requests.get(url=url,params=self.art_data,proxies=proxies,headers=self.headers,timeout=10)
             except Exception as result:
                 print('请求1出现错误:%s'%result)
-                logger.error('请求1出现错误:%s' % result)
+                self.logger.error('请求1出现错误:%s' % result)
                 time.sleep(r)
                 r += 10
                 continue
@@ -228,7 +238,7 @@ class daYuSpider(object):
 if __name__ == '__main__':
     for i in range(3):
         thread = daYuSpider()
-        time.sleep(1)
+        time.sleep(5)
         thread.start()
 
 
